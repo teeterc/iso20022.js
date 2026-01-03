@@ -2260,7 +2260,7 @@ const parseAgent = (agent) => {
         };
     }
     return {
-        abaRoutingNumber: (agent.FinInstnId.Othr?.Id || agent.FinInstnId.ClrSysMmbId.MmbId)?.toString(),
+        abaRoutingNumber: (agent.FinInstnId.Othr?.Id || agent.FinInstnId.ClrSysMmbId?.MmbId)?.toString(),
     };
 };
 const exportAgent = (agent) => {
