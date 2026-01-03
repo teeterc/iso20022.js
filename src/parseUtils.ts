@@ -79,7 +79,7 @@ export const parseAgent = (agent: any): Agent => {
   }
 
   return {
-    abaRoutingNumber: (agent.FinInstnId.Othr?.Id || agent.FinInstnId.ClrSysMmbId.MmbId).toString(),
+    abaRoutingNumber: (agent.FinInstnId.Othr?.Id || agent.FinInstnId.ClrSysMmbId.MmbId)?.toString(),
   } as Agent;
 };
 
