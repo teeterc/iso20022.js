@@ -2255,6 +2255,12 @@ const exportAccountIdentification = (accountId) => {
 };
 // TODO: Add both BIC and ABA routing numbers at the same time
 const parseAgent = (agent) => {
+    // The financial institution block (Svcr / Agt -> FinInstnId) is optional in
+    // ISO 20022. Some banks (e.g. Rabobank) omit it entirely, so guard before
+    // dereferencing FinInstnId to avoid a "Cannot read properties of undefined" throw.
+    if (!agent || !agent.FinInstnId) {
+        return undefined;
+    }
     // Get BIC if it exists first
     if (agent.FinInstnId.BIC) {
         return {
@@ -3676,7 +3682,8 @@ const parseStatement = (stmt) => {
     // Get account information
     // TODO: Save account types here
     const account = parseAccount(stmt.Acct);
-    const agent = parseAgent(stmt.Acct.Svcr);
+    // Svcr (account servicer / financial institution) is optional in CAMT.053.
+    const agent = stmt.Acct?.Svcr ? parseAgent(stmt.Acct.Svcr) : undefined;
     let balances = [];
     if (Array.isArray(stmt.Bal)) {
         balances = stmt.Bal.map(parseBalance);
@@ -3742,7 +3749,7 @@ const exportStatement = (stmt) => {
         },
         Acct: {
             ...exportAccount(stmt.account),
-            Svcr: exportAgent(stmt.agent)
+            ...(stmt.agent ? { Svcr: exportAgent(stmt.agent) } : {}),
         },
         Bal: stmt.balances.map((bal) => exportBalance(bal)),
         Ntry: stmt.entries.map((entry) => exportEntry(entry)),
