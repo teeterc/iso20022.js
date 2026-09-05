@@ -8,6 +8,9 @@
  * evidence — the version's XSD, or real bank output — never from memory:
  *
  *   02  pinned from test/assets/goldman_sachs (real bank output)
+ *   08  pinned from the ISO 20022 eRepository (2026-09-04 export),
+ *       BankToCustomerStatementV08 — the same export independently
+ *       reproduces the 02 and 12 rows below
  *   12  pinned from schemas/camt/camt.053.001.12.xsd
  *
  * To add a version, inspect its XSD for the three switches below and add a
@@ -23,6 +26,14 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BIC";
         /** Sts is the EntryStatus2Code simple type. */
         readonly statusAsChoice: false;
+    };
+    readonly '08': {
+        /** Dbtr/Cdtr are Party40Choice (Pty | Agt) — the same shape v12's Party50Choice keeps. */
+        readonly partyWrapper: true;
+        /** FinancialInstitutionIdentification18 spells it BICFI. */
+        readonly bicElement: "BICFI";
+        /** Sts is EntryStatus1Choice (Sts/Cd). */
+        readonly statusAsChoice: true;
     };
     readonly '12': {
         /** Dbtr/Cdtr are Party50Choice; the party sits under Pty (Dbtr/Pty/Nm). */
