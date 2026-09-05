@@ -5,21 +5,45 @@ import { Currency } from "../../lib/currency";
 export interface TransactionReport {
     msgId?: string;
     reqExecutionDate?: Date;
+    /**
+     * Payment status. `code` is `<branch>:<value>` over PaymentStatusCode6Choice
+     * (e.g. `Sttlm:ACCC`, `Fnl:STLD`, `Prtry:CUST`). `reason` follows the same
+     * convention for the coded branches of PaymentStatusReason1Choice
+     * (`Umtchd:DMON`, `Canc:CANI`, `PrtryRjctn:XXXX`) and is the bare text for
+     * the Prtry branch. Only the first Sts and first Rsn are read.
+     */
     status?: {
         code: string;
         reason?: string;
     };
-    debtor: Party;
-    debtorAgent: Agent;
-    creditor: Party;
-    creditorAgent: Agent;
+    /** Party50Choice: a party (Pty) or, when the bank identifies it as an institution, just an agent. */
+    debtor?: Party;
+    debtorAgent?: Agent;
+    creditor?: Party;
+    creditorAgent?: Agent;
 }
+/** Which branch of PaymentIdentification8Choice carried the identifier. */
+export type PaymentIdentifierType = 'TxId' | 'UETR' | 'QId' | 'LngBizId' | 'ShrtBizId' | 'PrtryId';
 export interface PaymentIdentification {
-    currency: Currency;
-    amount: number;
-    endToEndId: string;
+    identifierType: PaymentIdentifierType;
+    /**
+     * LngBizId/IntrBkSttlmAmt is ImpliedCurrencyAndAmount — a bare decimal. The
+     * currency is read from Tx/Pmt/IntrBkSttlmAmt or InstdAmt (AmtWthCcy) when
+     * the bank provides it. Absent that, `amount` is converted assuming two
+     * decimal places.
+     */
+    currency?: Currency;
+    /** In the smallest unit of `currency`. Only LngBizId carries an amount. */
+    amount?: number;
+    /** IntrBkSttlmDt — mandatory on both LngBizId and ShrtBizId. */
+    settlementDate?: Date;
+    instructingAgent?: Agent;
+    instructedAgent?: Agent;
+    endToEndId?: string;
     transactionId?: string;
     uetr?: string;
+    queueId?: string;
+    proprietaryId?: string;
 }
 export interface TransactionReportOrError {
     paymentId: PaymentIdentification;

@@ -1,4 +1,15 @@
 import { XMLBuilder, XMLParser } from 'fast-xml-parser';
+/**
+ * ISO 20022 identifiers (ABA routing numbers, clearing-system member ids,
+ * account numbers, references) are often numeric-looking with leading zeros,
+ * and amounts are plain decimals. Never let the XML parser reinterpret them:
+ * "021000021" must stay a string, and neither hex nor E-notation occur.
+ */
+export declare const ISO20022_NUMBER_PARSE_OPTIONS: {
+    readonly hex: false;
+    readonly leadingZeros: false;
+    readonly eNotation: false;
+};
 export type ISO20022MessageTypeName = `${string}.${string}`;
 export declare const ISO20022Messages: {
     [msg: string]: ISO20022MessageTypeName;

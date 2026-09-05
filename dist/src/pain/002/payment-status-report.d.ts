@@ -7,7 +7,7 @@ interface PaymentStatusReportConfig {
     /** Unique identifier for the message */
     messageId: string;
     creationDate: Date;
-    initatingParty: Party;
+    initatingParty?: Party;
     originalGroupInformation: OriginalGroupInformation;
     statusInformations: StatusInformation[];
 }
@@ -17,7 +17,7 @@ interface PaymentStatusReportConfig {
 export declare class PaymentStatusReport {
     private _messageId;
     private _creationDate;
-    private _initatingParty;
+    private _initatingParty?;
     private _originalGroupInformation;
     private _statusInformations;
     /**
@@ -45,7 +45,7 @@ export declare class PaymentStatusReport {
      * Gets the initiating party of the Payment Status Report.
      * @returns {Party} The initiating party.
      */
-    get initatingParty(): Party;
+    get initatingParty(): Party | undefined;
     /**
      * Gets the original message ID from the original group information.
      * @returns {string} The original message ID.

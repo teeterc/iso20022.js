@@ -2062,6 +2062,67 @@ var fxp = {
 };
 
 /**
+ * ISO 20022 identifiers (ABA routing numbers, clearing-system member ids,
+ * account numbers, references) are often numeric-looking with leading zeros,
+ * and amounts are plain decimals. Never let the XML parser reinterpret them:
+ * "021000021" must stay a string, and neither hex nor E-notation occur.
+ */
+const ISO20022_NUMBER_PARSE_OPTIONS = { hex: false, leadingZeros: false, eNotation: false };
+const ISO20022Messages = {
+    CAMT_003: "CAMT.003",
+    CAMT_004: "CAMT.004",
+    CAMT_005: "CAMT.005",
+    CAMT_006: "CAMT.006",
+    CAMT_053: "CAMT.053",
+    PAIN_001: "PAIN.001",
+    PAIN_002: "PAIN.002",
+};
+const ISO20022Implementations = new Map();
+function registerISO20022Implementation(cl) {
+    cl.supportedMessages().forEach((msg) => {
+        ISO20022Implementations.set(msg, cl);
+    });
+}
+function getISO20022Implementation(type) {
+    return ISO20022Implementations.get(type);
+}
+class XML {
+    /**
+     * Creates and configures the XML Parser
+     *
+     * @returns {XMLParser} A configured instance of XMLParser
+     */
+    static getParser() {
+        return new fxp.XMLParser({
+            ignoreAttributes: false,
+            attributeNamePrefix: '@_',
+            textNodeName: '#text',
+            numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS,
+            tagValueProcessor: (tagName, tagValue, _jPath, _hasAttributes, isLeafNode) => {
+                /**
+                 * Codes and Entry References can look like numbers and get parsed
+                 * appropriately. We don't want this to happen, as they contain leading
+                 * zeros or are too long and overflow.
+                 *
+                 * Ex. <Cd>0001234<Cd> Should resolve to "0001234"
+                 */
+                if (isLeafNode && ['Cd', 'NtryRef'].includes(tagName))
+                    return undefined;
+                return tagValue;
+            },
+        });
+    }
+    static getBuilder() {
+        return new fxp.XMLBuilder({
+            ignoreAttributes: false,
+            attributeNamePrefix: '@_',
+            textNodeName: '#text',
+            format: true,
+        });
+    }
+}
+
+/**
  * Convert array of 16 byte values to UUID string format of the form:
  * XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
  */
@@ -2334,6 +2395,10 @@ const parseDate = (dateElement) => {
     return new Date(date);
 };
 const parseParty = (party) => {
+    // Callers pass optional elements (e.g. GrpHdr/InitgPty, minOccurs="0").
+    if (!party) {
+        return undefined;
+    }
     return {
         id: party.Id?.OrgId?.Othr?.Id,
         name: party.Nm,
@@ -2378,7 +2443,9 @@ const exportMessageHeader = (header) => {
         CreDtTm: header.creationDateTime?.toISOString(),
     };
     if (header.originalMessageHeader) {
-        obj.OrgnlMsgHdr = exportMessageHeader(header.originalMessageHeader);
+        // The element is OrgnlBizQry (OriginalBusinessQuery1); parseMessageHeader
+        // reads it under that name, and OrgnlMsgHdr does not exist in the schema.
+        obj.OrgnlBizQry = exportMessageHeader(header.originalMessageHeader);
     }
     if (header.requestType) {
         obj.ReqTp = { Prtry: header.requestType }; // TODO: Add support for PmtCtrl and Enqry types
@@ -2623,7 +2690,7 @@ class SWIFTCreditPaymentInitiation extends PaymentInitiation {
      * @returns {string} The XML representation of the payment initiation.
      */
     static fromXML(rawXml) {
-        const parser = new fxp.XMLParser({ ignoreAttributes: false });
+        const parser = new fxp.XMLParser({ ignoreAttributes: false, numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS });
         const xml = parser.parse(rawXml);
         if (!xml.Document) {
             throw new InvalidXmlError("Invalid XML format");
@@ -2896,7 +2963,7 @@ class SEPACreditPaymentInitiation extends PaymentInitiation {
         return builder.build(xml);
     }
     static fromXML(rawXml) {
-        const parser = new fxp.XMLParser({ ignoreAttributes: false });
+        const parser = new fxp.XMLParser({ ignoreAttributes: false, numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS });
         const xml = parser.parse(rawXml);
         if (!xml.Document) {
             throw new InvalidXmlError("Invalid XML format");
@@ -3103,7 +3170,7 @@ class RTPCreditPaymentInitiation extends PaymentInitiation {
         return builder.build(xml);
     }
     static fromXML(rawXml) {
-        const parser = new fxp.XMLParser({ ignoreAttributes: false });
+        const parser = new fxp.XMLParser({ ignoreAttributes: false, numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS });
         const xml = parser.parse(rawXml);
         if (!xml.Document) {
             throw new InvalidXmlError("Invalid XML format");
@@ -3398,7 +3465,7 @@ class ACHCreditPaymentInitiation extends PaymentInitiation {
      * @throws {Error} If multiple payment information blocks are found.
      */
     static fromXML(rawXml) {
-        const parser = new fxp.XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text' });
+        const parser = new fxp.XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', textNodeName: '#text', numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS });
         const xml = parser.parse(rawXml);
         if (!xml.Document) {
             throw new InvalidXmlError("Invalid XML format");
@@ -3456,59 +3523,6 @@ class ACHCreditPaymentInitiation extends PaymentInitiation {
             creationDate: creationDate,
             initiatingParty: initiatingParty,
             paymentInstructions: paymentInstructions
-        });
-    }
-}
-
-const ISO20022Messages = {
-    CAMT_003: "CAMT.003",
-    CAMT_004: "CAMT.004",
-    CAMT_005: "CAMT.005",
-    CAMT_006: "CAMT.006",
-    CAMT_053: "CAMT.053",
-    PAIN_001: "PAIN.001",
-    PAIN_002: "PAIN.002",
-};
-const ISO20022Implementations = new Map();
-function registerISO20022Implementation(cl) {
-    cl.supportedMessages().forEach((msg) => {
-        ISO20022Implementations.set(msg, cl);
-    });
-}
-function getISO20022Implementation(type) {
-    return ISO20022Implementations.get(type);
-}
-class XML {
-    /**
-     * Creates and configures the XML Parser
-     *
-     * @returns {XMLParser} A configured instance of XMLParser
-     */
-    static getParser() {
-        return new fxp.XMLParser({
-            ignoreAttributes: false,
-            attributeNamePrefix: '@_',
-            textNodeName: '#text',
-            tagValueProcessor: (tagName, tagValue, _jPath, _hasAttributes, isLeafNode) => {
-                /**
-                 * Codes and Entry References can look like numbers and get parsed
-                 * appropriately. We don't want this to happen, as they contain leading
-                 * zeros or are too long and overflow.
-                 *
-                 * Ex. <Cd>0001234<Cd> Should resolve to "0001234"
-                 */
-                if (isLeafNode && ['Cd', 'NtryRef'].includes(tagName))
-                    return undefined;
-                return tagValue;
-            },
-        });
-    }
-    static getBuilder() {
-        return new fxp.XMLBuilder({
-            ignoreAttributes: false,
-            attributeNamePrefix: '@_',
-            textNodeName: '#text',
-            format: true,
         });
     }
 }
@@ -4257,18 +4271,18 @@ class CashManagementGetTransaction {
         }
         for (const rawCriterium of rawCriterias) {
             // search on Ids
-            if (rawCriterium.PmtSch.MsgId) {
+            if (rawCriterium.PmtSch?.MsgId) {
                 searchCriteria.push({
                     type: "PmtSch.MsgId",
-                    msgIdsEqualTo: Array.isArray(rawCriterium.PmtSch.MsgId) ? rawCriterium.PmtSch.MsgId : [rawCriterium.PmtSch.MsgId],
+                    msgIdsEqualTo: Array.isArray(rawCriterium.PmtSch?.MsgId) ? rawCriterium.PmtSch?.MsgId : [rawCriterium.PmtSch?.MsgId],
                 });
             }
             // seach on date
-            if (rawCriterium.PmtSch.ReqdExctnDt) {
-                if (Array.isArray(rawCriterium.PmtSch.ReqdExctnDt) && rawCriterium.PmtSch.ReqdExctnDt.length > 1) {
+            if (rawCriterium.PmtSch?.ReqdExctnDt) {
+                if (Array.isArray(rawCriterium.PmtSch?.ReqdExctnDt) && rawCriterium.PmtSch?.ReqdExctnDt.length > 1) {
                     throw new InvalidStructureError("Invalid CAMT.005 document: multiple ReqdExctnDt criterium not supported");
                 }
-                const criterium = Array.isArray(rawCriterium.PmtSch.ReqdExctnDt) ? rawCriterium.PmtSch.ReqdExctnDt[0] : rawCriterium.PmtSch.ReqdExctnDt;
+                const criterium = Array.isArray(rawCriterium.PmtSch?.ReqdExctnDt) ? rawCriterium.PmtSch?.ReqdExctnDt[0] : rawCriterium.PmtSch?.ReqdExctnDt;
                 if (criterium?.DtSch?.EQDt) {
                     searchCriteria.push({
                         type: "PmtSch.ReqdExctnDt",
@@ -4276,7 +4290,7 @@ class CashManagementGetTransaction {
                     });
                 }
             }
-            let pmtIds = Array.isArray(rawCriterium.PmtSch.PmtId) ? rawCriterium.PmtSch.PmtId : [rawCriterium.PmtSch.PmtId];
+            let pmtIds = Array.isArray(rawCriterium.PmtSch?.PmtId) ? rawCriterium.PmtSch?.PmtId : [rawCriterium.PmtSch?.PmtId];
             pmtIds = pmtIds.filter((p) => !!p && p.LngBizId?.EndToEndId);
             if (pmtIds.length > 0) {
                 searchCriteria.push({
@@ -4365,6 +4379,66 @@ class CashManagementGetTransaction {
 }
 registerISO20022Implementation(CashManagementGetTransaction);
 
+const NAMESPACE_PREFIX = 'urn:iso:std:iso:20022:tech:xsd:camt.006.001.';
+const SERIALIZE_NAMESPACE = `${NAMESPACE_PREFIX}11`;
+const IDENTIFIER_BRANCHES = ['LngBizId', 'ShrtBizId', 'TxId', 'UETR', 'QId', 'PrtryId'];
+const STATUS_CODE_BRANCHES = ['Pdg', 'Fnl', 'RTGS', 'Sttlm', 'Prtry'];
+const STATUS_REASON_CODED_BRANCHES = ['Umtchd', 'Canc', 'Sspd', 'PdgFlngSttlm', 'PdgSttlm'];
+const first = (v) => (Array.isArray(v) ? v[0] : v);
+const parsePaymentIdentification = (pmtId) => {
+    if (!pmtId) {
+        throw new InvalidStructureError("Invalid CAMT.006 document: missing PmtId");
+    }
+    const identifierType = IDENTIFIER_BRANCHES.find((b) => pmtId[b] !== undefined);
+    if (!identifierType) {
+        throw new InvalidStructureError("Invalid CAMT.006 document: PmtId has none of TxId, UETR, QId, LngBizId, ShrtBizId or PrtryId");
+    }
+    const lng = pmtId.LngBizId;
+    const biz = lng ?? pmtId.ShrtBizId;
+    return {
+        identifierType,
+        settlementDate: parseDate(biz?.IntrBkSttlmDt),
+        instructingAgent: parseAgent(biz?.InstgAgt),
+        instructedAgent: parseAgent(biz?.InstdAgt),
+        endToEndId: lng?.EndToEndId,
+        transactionId: biz?.TxId ?? pmtId.TxId,
+        uetr: biz?.UETR ?? pmtId.UETR,
+        queueId: pmtId.QId?.QId,
+        proprietaryId: pmtId.PrtryId,
+    };
+};
+const parseStatus$1 = (rawSts) => {
+    const sts = first(rawSts);
+    const cd = sts?.Cd;
+    const codeBranch = cd ? STATUS_CODE_BRANCHES.find((b) => cd[b] !== undefined) : undefined;
+    if (!codeBranch)
+        return undefined;
+    const code = `${codeBranch}:${cd[codeBranch]}`;
+    const rsn = first(sts.Rsn);
+    let reason;
+    if (rsn?.Prtry !== undefined) {
+        reason = String(rsn.Prtry);
+    }
+    else if (rsn?.PrtryRjctn) {
+        reason = `PrtryRjctn:${rsn.PrtryRjctn.PrtryStsRsn}`;
+    }
+    else if (rsn) {
+        const b = STATUS_REASON_CODED_BRANCHES.find((b) => rsn[b] !== undefined);
+        if (b)
+            reason = `${b}:${rsn[b]}`;
+    }
+    return { code, reason };
+};
+/** Party50Choice is Pty | Agt. */
+const parsePartyChoice = (choice) => {
+    if (choice?.Pty)
+        return parseParty(choice.Pty);
+    if (choice?.Agt) {
+        const agent = parseAgent(choice.Agt);
+        return agent ? { agent } : undefined;
+    }
+    return undefined;
+};
 class CashManagementReturnTransaction {
     _data;
     constructor(data) {
@@ -4382,82 +4456,45 @@ class CashManagementReturnTransaction {
             throw new InvalidStructureError("Invalid CAMT.006 document: missing MsgHdr");
         }
         const header = parseMessageHeader(rawHeader);
-        // interpret the report
         let rawReports = doc.Document?.RtrTx?.RptOrErr?.BizRpt?.TxRpt;
         if (!Array.isArray(rawReports))
             rawReports = [rawReports];
-        rawReports = rawReports.filter((r) => !!r); // remove null/undefined
+        rawReports = rawReports.filter((r) => !!r);
         const reports = rawReports.map((r) => {
-            const rawAmount = r.PmtId?.LngBizId?.IntrBkSttlmAmt?.Amt || r.PmtId?.LngBizId?.IntrBkSttlmAmt?.Amount; // some implementations use Amount instead of Amt
-            const paymentId = {
-                currency: r.PmtId?.LngBizId?.IntrBkSttlmAmt?.Ccy,
-                amount: parseAmountToMinorUnits(rawAmount, r.PmtId?.LngBizId?.IntrBkSttlmAmt?.Ccy),
-                endToEndId: r.PmtId?.LngBizId?.EndToEndId,
-                transactionId: r.PmtId?.LngBizId?.TxId,
-                uetr: r.PmtId?.LngBizId?.UETR,
-            };
-            // check required fields
-            if (!paymentId.currency) {
-                throw new InvalidStructureError("Invalid CAMT.006 document: missing Ccy in PmtId.LngBizId.IntrBkSttlmAmt");
-            }
-            if (paymentId.amount === undefined || paymentId.amount === null || isNaN(paymentId.amount)) {
-                throw new InvalidStructureError("Invalid CAMT.006 document: missing or invalid Amt in PmtId.LngBizId.IntrBkSttlmAmt");
-            }
-            if (!paymentId.endToEndId) {
-                throw new InvalidStructureError("Invalid CAMT.006 document: missing EndToEndId in PmtId.LngBizId");
+            const paymentId = parsePaymentIdentification(r.PmtId);
+            const pmt = r.TxOrErr?.Tx?.Pmt;
+            // Currency lives on Pmt (Amount2Choice/Amount3Choice AmtWthCcy). The
+            // pre-conformance dialect put {Amt, Ccy} inside LngBizId/IntrBkSttlmAmt;
+            // keep reading it so existing JSON inputs still work.
+            const rawSttlmAmt = r.PmtId?.LngBizId?.IntrBkSttlmAmt;
+            const legacyAmountBlock = rawSttlmAmt !== null && typeof rawSttlmAmt === 'object' ? rawSttlmAmt : undefined;
+            const ccyNode = pmt?.IntrBkSttlmAmt?.AmtWthCcy ?? pmt?.InstdAmt?.AmtWthCcy;
+            paymentId.currency = ccyNode?.['@_Ccy'] ?? legacyAmountBlock?.Ccy;
+            const rawAmount = legacyAmountBlock
+                ? legacyAmountBlock.Amt ?? legacyAmountBlock.Amount ?? legacyAmountBlock['#text']
+                : rawSttlmAmt;
+            if (rawAmount !== undefined && rawAmount !== null && rawAmount !== '') {
+                const amount = parseAmountToMinorUnits(rawAmount, paymentId.currency);
+                if (isNaN(amount)) {
+                    throw new InvalidStructureError("Invalid CAMT.006 document: invalid Amt in PmtId.LngBizId.IntrBkSttlmAmt");
+                }
+                paymentId.amount = amount;
             }
             let report = undefined;
             let error = undefined;
             if (r.TxOrErr?.Tx) {
-                // report
-                const msgId = r.TxOrErr.Tx.Pmt?.MsgId;
-                const reqExecutionDate = r.TxOrErr.Tx.Pmt?.ReqdExctnDt?.Dt ? parseDate(r.TxOrErr.Tx.Pmt.ReqdExctnDt) : undefined;
-                const status = ((sts) => {
-                    if (!sts)
-                        return undefined;
-                    if (Array.isArray(sts) && sts.length === 0)
-                        return undefined;
-                    if (Array.isArray(sts))
-                        sts = sts[0]; // take the first one only
-                    let code = sts.Cd?.Pdg || sts.Cd?.Fnl || sts.Cd?.RTGS || sts.Cd?.Sttlm || sts.Cd?.Prtly;
-                    if (code)
-                        code = Object.keys(sts.Cd)[0] + ":" + code; // prefix with the type of code
-                    else
-                        return undefined;
-                    const reason = sts.Rsn?.Prtry;
-                    return { code, reason };
-                })(r.TxOrErr.Tx.Pmt?.Sts);
-                // to parse debtor and creditor with their agents
-                function parseParty$1(party) {
-                    const p = parseParty(party?.Pty || {}); // force a valid object
-                    if (party?.Agt)
-                        p.agent = { bic: party.Agt.FinInstnId?.BICFI };
-                    return p;
-                }
-                function parseAgent(agent) {
-                    if (!agent)
-                        return { bic: "" };
-                    return { bic: agent?.FinInstnId?.BICFI };
-                }
+                const pties = pmt?.Pties;
                 report = {
-                    msgId,
-                    reqExecutionDate,
-                    status,
-                    debtor: parseParty$1(r.TxOrErr.Tx.Pmt?.Pties?.Dbtr),
-                    debtorAgent: parseAgent(r.TxOrErr.Tx.Pmt?.Pties?.DbtrAgt),
-                    creditor: parseParty$1(r.TxOrErr.Tx.Pmt?.Pties?.Cdtr),
-                    creditorAgent: parseAgent(r.TxOrErr.Tx.Pmt?.Pties?.CdtrAgt),
+                    msgId: pmt?.MsgId,
+                    reqExecutionDate: parseDate(pmt?.ReqdExctnDt),
+                    status: parseStatus$1(pmt?.Sts),
+                    debtor: parsePartyChoice(pties?.Dbtr),
+                    debtorAgent: parseAgent(pties?.DbtrAgt),
+                    creditor: parsePartyChoice(pties?.Cdtr),
+                    creditorAgent: parseAgent(pties?.CdtrAgt),
                 };
-                // check the debtor and creditor required fields
-                if (!report.debtor.id) {
-                    throw new InvalidStructureError("Invalid CAMT.006 document: missing Id in TxOrErr.Tx.Dbtr.Pty");
-                }
-                if (!report.creditor.id) {
-                    throw new InvalidStructureError("Invalid CAMT.006 document: missing Id in TxOrErr.Tx.Cdtr.Pty");
-                }
             }
             else if (r.TxOrErr?.BizErr) {
-                // business error
                 error = parseBusinessError(r.TxOrErr.BizErr);
             }
             else {
@@ -4465,10 +4502,7 @@ class CashManagementReturnTransaction {
             }
             return { paymentId, report, error };
         });
-        return new CashManagementReturnTransaction({
-            header,
-            reports,
-        });
+        return new CashManagementReturnTransaction({ header, reports });
     }
     static fromXML(xml) {
         const parser = XML.getParser();
@@ -4477,8 +4511,8 @@ class CashManagementReturnTransaction {
             throw new Error("Invalid XML format");
         }
         const namespace = (doc.Document['@_xmlns'] || doc.Document['@_Xmlns']);
-        if (!namespace.startsWith('urn:iso:std:iso:20022:tech:xsd:camt.004.001.')) {
-            throw new InvalidXmlNamespaceError('Invalid CAMT.004 namespace');
+        if (!namespace.startsWith(NAMESPACE_PREFIX)) {
+            throw new InvalidXmlNamespaceError('Invalid CAMT.006 namespace');
         }
         return CashManagementReturnTransaction.fromDocumentOject(doc);
     }
@@ -4492,80 +4526,105 @@ class CashManagementReturnTransaction {
     serialize() {
         const builder = XML.getBuilder();
         const obj = this.toJSON();
-        obj.Document['@_xmlns'] = 'urn:iso:std:iso:20022:tech:xsd:camt.004.001.02';
+        obj.Document['@_xmlns'] = SERIALIZE_NAMESPACE;
         obj.Document['@_xmlns:xsi'] = 'http://www.w3.org/2001/XMLSchema-instance';
         return builder.build(obj);
     }
     toJSON() {
-        // we should not have to serialize but we do it for consistency
+        // Element order below follows the xs:sequence of each camt.006.001.11 type.
+        const exportAgent = (a) => {
+            if (!a)
+                return undefined;
+            if ("bic" in a && a.bic)
+                return { FinInstnId: { BICFI: a.bic } };
+            if ("abaRoutingNumber" in a && a.abaRoutingNumber)
+                return { FinInstnId: { Othr: { Id: a.abaRoutingNumber } } };
+            return undefined;
+        };
+        const exportParty = (p) => {
+            if (!p)
+                return undefined;
+            if (p.name === undefined && p.id === undefined && p.agent)
+                return { Agt: exportAgent(p.agent) };
+            return {
+                Pty: {
+                    Nm: p.name,
+                    Id: p.id ? { OrgId: { Othr: { Id: p.id } } } : undefined,
+                },
+            };
+        };
+        const exportPaymentId = (id) => {
+            const date = id.settlementDate?.toISOString().slice(0, 10);
+            switch (id.identifierType) {
+                case 'LngBizId':
+                    return { LngBizId: {
+                            TxId: id.transactionId,
+                            UETR: id.uetr,
+                            IntrBkSttlmAmt: id.amount !== undefined ? exportAmountToString(id.amount, id.currency) : undefined,
+                            IntrBkSttlmDt: date,
+                            InstgAgt: exportAgent(id.instructingAgent),
+                            InstdAgt: exportAgent(id.instructedAgent),
+                            EndToEndId: id.endToEndId,
+                        } };
+                case 'ShrtBizId':
+                    return { ShrtBizId: { TxId: id.transactionId, UETR: id.uetr, IntrBkSttlmDt: date, InstgAgt: exportAgent(id.instructingAgent) } };
+                case 'TxId': return { TxId: id.transactionId };
+                case 'UETR': return { UETR: id.uetr };
+                case 'QId': return { QId: { QId: id.queueId } };
+                case 'PrtryId': return { PrtryId: id.proprietaryId };
+            }
+        };
+        const exportStatus = (s) => {
+            if (!s)
+                return undefined;
+            const [codeBranch, ...codeRest] = s.code.split(':');
+            const codeValue = codeRest.join(':');
+            let Rsn = undefined;
+            if (s.reason !== undefined) {
+                const idx = s.reason.indexOf(':');
+                const branch = idx > 0 ? s.reason.slice(0, idx) : undefined;
+                Rsn = branch && STATUS_REASON_CODED_BRANCHES.includes(branch)
+                    ? { [branch]: s.reason.slice(idx + 1) }
+                    : { Prtry: s.reason };
+            }
+            return { Cd: { [codeBranch]: codeValue }, Rsn };
+        };
         const Document = {
             RtrTx: {
                 MsgHdr: exportMessageHeader(this._data.header),
                 RptOrErr: {
                     BizRpt: {
                         TxRpt: this._data.reports.map((report) => {
-                            const obj = {
-                                PmtId: {
-                                    LngBizId: {
-                                        IntrBkSttlmAmt: {
-                                            Amt: exportAmountToString(report.paymentId.amount, report.paymentId.currency),
-                                            Amount: exportAmountToString(report.paymentId.amount, report.paymentId.currency), // some implementations use Amount instead of Amt
-                                            Ccy: report.paymentId.currency,
-                                        },
-                                        UETR: report.paymentId.uetr,
-                                        TxId: report.paymentId.transactionId,
-                                        EndToEndId: report.paymentId.endToEndId,
-                                    }
-                                },
-                                TxOrErr: {}, // filled below
-                            };
+                            const obj = { PmtId: exportPaymentId(report.paymentId), TxOrErr: {} };
                             if (report.report) {
-                                function exportParty(p) {
-                                    if (!p)
-                                        return undefined;
-                                    return {
-                                        Pty: {
-                                            Nm: p.name,
-                                            Id: p.id ? { OrgId: { Othr: { Id: p.id } } } : undefined,
-                                        },
-                                        Agt: exportAgent(p.agent),
-                                    };
-                                }
-                                function exportAgent(a) {
-                                    if (!a)
-                                        return undefined;
-                                    if ("bic" in a && a.bic)
-                                        return { FinInstnId: { BICFI: a.bic } };
-                                    if ("abaRoutingNumber" in a && a.abaRoutingNumber)
-                                        return { FinInstId: { Othr: { Id: a.abaRoutingNumber } } };
-                                    return undefined;
-                                }
-                                const [codeType, code] = report.report.status ? report.report.status.code.split(":") : [undefined, undefined];
+                                const rr = report.report;
+                                const hasParties = rr.debtor || rr.debtorAgent || rr.creditor || rr.creditorAgent;
+                                const ccyAmount = report.paymentId.currency && report.paymentId.amount !== undefined
+                                    ? { AmtWthCcy: { '#text': exportAmountToString(report.paymentId.amount, report.paymentId.currency), '@_Ccy': report.paymentId.currency } }
+                                    : undefined;
                                 obj.TxOrErr.Tx = {
                                     Pmt: {
-                                        MsgId: report.report.msgId,
-                                        ReqdExctnDt: { Dt: report.report.reqExecutionDate?.toISOString()?.slice(0, 10) },
-                                        Sts: {
-                                            Cd: codeType ? { [codeType]: code } : undefined,
-                                            Rsn: report.report.status?.reason ? { Prtry: report.report.status.reason } : undefined,
-                                        },
-                                        Pties: {
-                                            Dbtr: exportParty(report.report.debtor),
-                                            DbtrAgt: exportAgent(report.report.debtorAgent),
-                                            Cdtr: exportParty(report.report.creditor),
-                                            CdtrAgt: exportAgent(report.report.creditorAgent),
-                                        }
-                                    }
+                                        MsgId: rr.msgId,
+                                        ReqdExctnDt: rr.reqExecutionDate ? { DtTm: rr.reqExecutionDate.toISOString() } : undefined,
+                                        Sts: exportStatus(rr.status),
+                                        IntrBkSttlmAmt: ccyAmount,
+                                        Pties: hasParties ? {
+                                            Dbtr: exportParty(rr.debtor),
+                                            DbtrAgt: exportAgent(rr.debtorAgent),
+                                            CdtrAgt: exportAgent(rr.creditorAgent),
+                                            Cdtr: exportParty(rr.creditor),
+                                        } : undefined,
+                                    },
                                 };
                             }
                             else if (report.error) {
                                 obj.TxOrErr.BizErr = exportBusinessError(report.error);
                             }
                             return obj;
-                        })
-                    }
-                }
-            }
+                        }),
+                    },
+                },
+            },
         };
         return { Document };
     }
@@ -4813,39 +4872,61 @@ class ISO20022 {
  * Represents the status codes in a payment status report.
  * @see {@link https://www.iso20022.org/sites/default/files/2022-03/externalcodesets_4q2021_v2_1.xlsx}
  */
+/**
+ * Codes from the ISO 20022 external code sets ExternalPaymentGroupStatus1Code
+ * and ExternalPaymentTransactionStatus1Code. The schema itself only constrains
+ * these to 1–4 characters, so an unlisted code is still passed through as-is.
+ */
 const PaymentStatusCode = {
-    Rejected: 'RJCT',
-    PartiallyAccepted: 'ACCP',
-    Pending: 'PNDG',
+    AcceptedCreditSettlementCompleted: 'ACCC',
+    AcceptedCustomerProfile: 'ACCP',
+    /** Alias of AcceptedCustomerProfile, kept for existing callers. */
     Accepted: 'ACCP',
-    AcceptedSettlementInProgress: 'ACSP',
-    AcceptedCreditSettlementCompleted: 'ACSC',
+    AcceptedFundsChecked: 'ACFC',
+    AcceptedAndInstructedSettlement: 'ACIS',
+    AcceptedClearingProcessed: 'ACPD',
     AcceptedSettlementCompleted: 'ACSC',
+    AcceptedSettlementInProgress: 'ACSP',
     AcceptedTechnicalValidation: 'ACTC',
+    AcceptedWithChange: 'ACWC',
+    AcceptedWithoutPosting: 'ACWP',
+    Blocked: 'BLCK',
+    Cancelled: 'CANC',
+    CashPoolUnavailable: 'CPUC',
+    PartiallyAccepted: 'PART',
+    PartiallyAcceptedTechnicalCorrect: 'PATC',
+    Pending: 'PDNG',
+    Presented: 'PRES',
+    Received: 'RCVD',
+    Rejected: 'RJCT',
 };
 
 // NOTE: Consider not even using this switch statement.
 const parseStatus = (status) => {
-    switch (status) {
-        case PaymentStatusCode.Rejected:
-            return PaymentStatusCode.Rejected;
-        case PaymentStatusCode.PartiallyAccepted:
-            return PaymentStatusCode.PartiallyAccepted;
-        case PaymentStatusCode.Pending:
-            return PaymentStatusCode.Pending;
-        case PaymentStatusCode.Accepted:
-            return PaymentStatusCode.Accepted;
-        case PaymentStatusCode.AcceptedSettlementInProgress:
-            return PaymentStatusCode.AcceptedSettlementInProgress;
-        case PaymentStatusCode.AcceptedCreditSettlementCompleted:
-            return PaymentStatusCode.AcceptedCreditSettlementCompleted;
-        case PaymentStatusCode.AcceptedSettlementCompleted:
-            return PaymentStatusCode.AcceptedSettlementCompleted;
-        case PaymentStatusCode.AcceptedTechnicalValidation:
-            return PaymentStatusCode.AcceptedTechnicalValidation;
-        default:
-            throw new Error(`Unknown status: ${status}`);
+    // GrpSts / PmtInfSts / TxSts are external code sets; the schema only fixes
+    // their length at 1–4 characters, so any well-formed code is accepted.
+    if (typeof status !== 'string' || status.length < 1 || status.length > 4) {
+        throw new Error(`Invalid status: ${String(status)}`);
     }
+    return status;
+};
+/**
+ * StsRsnInf is maxOccurs="unbounded" at group, payment and transaction level.
+ * The code is taken from the first block that carries a reason (Cd or Prtry);
+ * additional information is folded across every block.
+ */
+const parseStatusReason = (rawStsRsnInf) => {
+    const infos = Array.isArray(rawStsRsnInf) ? rawStsRsnInf : rawStsRsnInf ? [rawStsRsnInf] : [];
+    const withReason = infos.find((i) => i?.Rsn !== undefined);
+    const code = withReason?.Rsn?.Cd ?? withReason?.Rsn?.Prtry;
+    const lines = infos.flatMap((i) => {
+        const a = i?.AddtlInf;
+        return a === undefined ? [] : Array.isArray(a) ? a : [a];
+    });
+    return {
+        code: code !== undefined ? String(code) : undefined,
+        additionalInformation: lines.length ? lines.join('\n') : undefined,
+    };
 };
 const parseGroupStatusInformation = (originalGroupInfAndStatus) => {
     if (!originalGroupInfAndStatus.hasOwnProperty('GrpSts')) {
@@ -4855,10 +4936,7 @@ const parseGroupStatusInformation = (originalGroupInfAndStatus) => {
         type: 'group',
         originalMessageId: originalGroupInfAndStatus.OrgnlMsgId,
         status: parseStatus(originalGroupInfAndStatus.GrpSts),
-        reason: {
-            code: originalGroupInfAndStatus.StsRsnInf?.Rsn?.Cd,
-            additionalInformation: parseAdditionalInformation(originalGroupInfAndStatus.StsRsnInf?.AddtlInf),
-        },
+        reason: parseStatusReason(originalGroupInfAndStatus.StsRsnInf),
     };
 };
 const parsePaymentStatusInformations = (originalPaymentInfAndStatuses) => {
@@ -4871,10 +4949,7 @@ const parsePaymentStatusInformations = (originalPaymentInfAndStatuses) => {
             type: 'payment',
             originalPaymentId: payment.OrgnlPmtInfId,
             status: parseStatus(payment.PmtInfSts),
-            reason: {
-                code: payment.StsRsnInf?.Rsn?.Cd,
-                additionalInformation: parseAdditionalInformation(payment.StsRsnInf?.AddtlInf),
-            },
+            reason: parseStatusReason(payment.StsRsnInf),
         };
     })
         .filter((status) => status !== null);
@@ -4885,10 +4960,7 @@ const parseTransactionStatusInformations = (allTxnsInfoAndStatuses) => {
             type: 'transaction',
             originalEndToEndId: transaction.OrgnlEndToEndId,
             status: parseStatus(transaction.TxSts),
-            reason: {
-                code: transaction.StsRsnInf?.Rsn?.Cd,
-                additionalInformation: parseAdditionalInformation(transaction.StsRsnInf?.Rsn?.AddtlInf),
-            },
+            reason: parseStatusReason(transaction.StsRsnInf),
         };
     });
     return transactionStatuses;
@@ -4920,7 +4992,7 @@ class PaymentStatusReport {
      * @returns {PaymentStatusReport} A new PaymentStatusReport instance.
      */
     static fromXML(rawXml) {
-        const parser = new fxp.XMLParser({ ignoreAttributes: false });
+        const parser = new fxp.XMLParser({ ignoreAttributes: false, numberParseOptions: ISO20022_NUMBER_PARSE_OPTIONS });
         const xml = parser.parse(rawXml);
         const customerPaymentStatusReport = xml.Document.CstmrPmtStsRpt;
         const rawCreationDate = customerPaymentStatusReport.GrpHdr.CreDtTm;

@@ -13,17 +13,35 @@ export type StatusType = 'group' | 'payment' | 'transaction';
  * Represents the status codes in a payment status report.
  * @see {@link https://www.iso20022.org/sites/default/files/2022-03/externalcodesets_4q2021_v2_1.xlsx}
  */
+/**
+ * Codes from the ISO 20022 external code sets ExternalPaymentGroupStatus1Code
+ * and ExternalPaymentTransactionStatus1Code. The schema itself only constrains
+ * these to 1–4 characters, so an unlisted code is still passed through as-is.
+ */
 export declare const PaymentStatusCode: {
-    readonly Rejected: "RJCT";
-    readonly PartiallyAccepted: "ACCP";
-    readonly Pending: "PNDG";
+    readonly AcceptedCreditSettlementCompleted: "ACCC";
+    readonly AcceptedCustomerProfile: "ACCP";
+    /** Alias of AcceptedCustomerProfile, kept for existing callers. */
     readonly Accepted: "ACCP";
-    readonly AcceptedSettlementInProgress: "ACSP";
-    readonly AcceptedCreditSettlementCompleted: "ACSC";
+    readonly AcceptedFundsChecked: "ACFC";
+    readonly AcceptedAndInstructedSettlement: "ACIS";
+    readonly AcceptedClearingProcessed: "ACPD";
     readonly AcceptedSettlementCompleted: "ACSC";
+    readonly AcceptedSettlementInProgress: "ACSP";
     readonly AcceptedTechnicalValidation: "ACTC";
+    readonly AcceptedWithChange: "ACWC";
+    readonly AcceptedWithoutPosting: "ACWP";
+    readonly Blocked: "BLCK";
+    readonly Cancelled: "CANC";
+    readonly CashPoolUnavailable: "CPUC";
+    readonly PartiallyAccepted: "PART";
+    readonly PartiallyAcceptedTechnicalCorrect: "PATC";
+    readonly Pending: "PDNG";
+    readonly Presented: "PRES";
+    readonly Received: "RCVD";
+    readonly Rejected: "RJCT";
 };
-export type PaymentStatus = (typeof PaymentStatusCode)[keyof typeof PaymentStatusCode];
+export type PaymentStatus = (typeof PaymentStatusCode)[keyof typeof PaymentStatusCode] | (string & {});
 /**
  * Represents the base structure for status information in a payment status report.
  */
