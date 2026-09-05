@@ -145,3 +145,6 @@ CLAUDE.md
 # Generated files during unit testing
 test/assets/**/*.out.json
 test/assets/**/*.out.xml
+
+# Local ISO 20022 eRepository export used to pin version profiles (118 MB)
+temp/
