@@ -3998,9 +3998,13 @@ const exportTransactionDetails = (tx) => {
         RmtInf: {
             Ustrd: tx.remittanceInformation,
         },
-        Purp: {
-            Prtry: tx.proprietaryPurpose,
-        },
+        // Purpose2Choice is Cd | Prtry and must have exactly one child, so omit the
+        // element entirely when neither is set rather than emitting an empty <Purp/>.
+        Purp: tx.purposeCode
+            ? { Cd: tx.purposeCode }
+            : tx.proprietaryPurpose
+                ? { Prtry: tx.proprietaryPurpose }
+                : undefined,
         RtrInf: {
             // Write the ReturnReason5Choice branch back. Prtry is the safe default for
             // an unknown source: any Max35Text is valid there, whereas Cd is limited
@@ -4033,7 +4037,9 @@ const exportTransactionDetails = (tx) => {
             },
             CdtrAcct: tx.creditor.account ? exportAccount(tx.creditor.account) : undefined,
         };
+        // Spread, or the creditor block silently overwrites the DbtrAgt set above.
         obj.RltdAgts = {
+            ...obj.RltdAgts,
             CdtrAgt: tx.creditor.agent ? exportAgent(tx.creditor.agent) : undefined,
         };
     }
