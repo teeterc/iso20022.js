@@ -8,7 +8,7 @@ export declare const parseAgent: (agent: any) => Agent | undefined;
 export declare const exportAgent: (agent: Agent) => any;
 export declare const parseAmountToMinorUnits: (rawAmount: number, currency?: Currency) => number;
 export declare const exportAmountToString: (amount: number, currency?: Currency) => string;
-export declare const parseDate: (dateElement: any) => Date;
+export declare const parseDate: (dateElement: any) => Date | undefined;
 export declare const parseParty: (party: any) => Party;
 export declare const parseRecipient: (recipient: any) => {
     id?: string;

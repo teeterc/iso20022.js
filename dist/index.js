@@ -2216,17 +2216,19 @@ function sumAmounts(amounts, currency) {
 }
 
 const parseAccount = (account) => {
-    // Return just IBAN if it exists, else detailed local account details
-    if (account.Id.IBAN) {
+    // Return just IBAN if it exists, else detailed local account details.
+    // CashAccount40/43 declare Id as minOccurs="0", so an account may carry only
+    // Nm and Ccy — guard before dereferencing it.
+    if (account?.Id?.IBAN) {
         return {
             iban: account.Id.IBAN,
         };
     }
     // TODO: Add support for .Tp.Cd and .Tp.Prtry
     return {
-        ...(account.Id?.Othr?.Id && { accountNumber: String(account.Id.Othr.Id) }),
-        ...(account.Nm && { name: account.Nm }),
-        ...(account.Ccy && { currency: account.Ccy }),
+        ...(account?.Id?.Othr?.Id && { accountNumber: String(account.Id.Othr.Id) }),
+        ...(account?.Nm && { name: account.Nm }),
+        ...(account?.Ccy && { currency: account.Ccy }),
     };
 };
 const exportAccount = (account) => {
@@ -2286,10 +2288,13 @@ const parseAgent = (agent) => {
     if (!agent || !agent.FinInstnId) {
         return undefined;
     }
-    // Get BIC if it exists first
-    if (agent.FinInstnId.BIC) {
+    // Get BIC if it exists first. The element was renamed from BIC to BICFI in the
+    // 2014 ISO revision (CAMT.053.001.09+ / FinancialInstitutionIdentification23),
+    // so accept either spelling.
+    const bic = agent.FinInstnId.BICFI ?? agent.FinInstnId.BIC;
+    if (bic) {
         return {
-            bic: agent.FinInstnId.BIC,
+            bic,
         };
     }
     return {
@@ -2311,13 +2316,21 @@ const exportAgent = (agent) => {
 // Parse raw currency data and turn into minor units
 const parseAmountToMinorUnits = (rawAmount, currency = 'USD') => {
     const precision = getCurrencyPrecision(currency);
-    // Also make sure Javascript number parsing error do not happen.
-    return Math.floor(Number(rawAmount) * 10 ** precision);
+    // Round rather than floor: binary floating point makes products like
+    // 8.29 * 100 land on 828.9999999999999, and flooring silently drops a
+    // minor unit (8.29 -> 828 instead of 829).
+    return Math.round(Number(rawAmount) * 10 ** precision);
 };
 const exportAmountToString = (amount, currency = 'USD') => {
     return formatAmount(amount, currency);
 };
 const parseDate = (dateElement) => {
+    // DateAndDateTime2Choice is a choice of Dt | DtTm, and the element carrying it
+    // is itself optional in several places (Ntry/BookgDt, Bal/ValDt), so an absent
+    // element is valid input rather than a parse failure.
+    if (dateElement === undefined || dateElement === null) {
+        return undefined;
+    }
     // Find the date element, which can be DtTm or Dt
     const date = dateElement.DtTm || dateElement.Dt || dateElement;
     return new Date(date);
@@ -3661,7 +3674,9 @@ const parseStatement = (stmt) => {
     const id = stmt.Id.toString();
     const electronicSequenceNumber = stmt.ElctrncSeqNb;
     const legalSequenceNumber = stmt.LglSeqNb;
-    const creationDate = new Date(stmt.CreDtTm);
+    // CreDtTm is minOccurs="0" on AccountStatement13; absent should stay undefined
+    // rather than becoming an Invalid Date that propagates downstream.
+    const creationDate = stmt.CreDtTm ? new Date(stmt.CreDtTm) : undefined;
     let fromDate;
     let toDate;
     if (stmt.FrToDt) {
@@ -3727,7 +3742,7 @@ const exportStatement = (stmt) => {
         Id: stmt.id,
         ElctrncSeqNb: stmt.electronicSequenceNumber,
         LglSeqNb: stmt.legalSequenceNumber,
-        CreDtTm: stmt.creationDate.toISOString(),
+        CreDtTm: stmt.creationDate?.toISOString(),
         FrToDt: stmt.fromDate && stmt.toDate
             ? {
                 FrDtTm: stmt.fromDate.toISOString().slice(0, 10),
@@ -3765,7 +3780,8 @@ const parseBalance = (balance) => {
     const currency = balance.Amt['@_Ccy'];
     const amount = parseAmountToMinorUnits(rawAmount, currency);
     const creditDebitIndicator = balance.CdtDbtInd === 'CRDT' ? 'credit' : 'debit';
-    const type = balance.Tp.CdOrPrtry.Cd;
+    // BalanceType10Choice is a choice of Cd | Prtry — read whichever branch is present.
+    const type = balance.Tp?.CdOrPrtry?.Cd ?? balance.Tp?.CdOrPrtry?.Prtry;
     const date = parseDate(balance.Dt);
     return {
         date,
@@ -3798,8 +3814,10 @@ const parseBalanceReport = (currency, balance) => {
     const amount = parseAmountToMinorUnits(rawAmount, currency);
     const creditDebitIndicator = balance.CdtDbtInd === 'CRDT' ? 'credit' : 'debit';
     const type = balance.Tp?.Cd || balance.Tp?.Prtry;
-    const valueDate = parseDate(balance.ValDt?.Dt);
-    const processingDate = parseDate(balance.PrcgDt?.DtTm);
+    // Pass the whole wrapper: parseDate resolves the Dt | DtTm choice itself, so
+    // pre-selecting one branch loses the other and passes undefined on absence.
+    const valueDate = parseDate(balance.ValDt);
+    const processingDate = parseDate(balance.PrcgDt);
     return {
         amount,
         creditDebitIndicator,
@@ -3869,9 +3887,9 @@ const exportEntry = (entry) => {
     const obj = {
         NtryRef: entry.referenceId,
         CdtDbtInd: entry.creditDebitIndicator === 'credit' ? 'CRDT' : 'DBIT',
-        BookgDt: {
-            DtTm: entry.bookingDate.toISOString(),
-        },
+        BookgDt: entry.bookingDate
+            ? { DtTm: entry.bookingDate.toISOString() }
+            : undefined,
         RvslInd: entry.reversal,
         Amt: {
             '#text': exportAmountToString(entry.amount, entry.currency),
@@ -3884,14 +3902,31 @@ const exportEntry = (entry) => {
     };
     return obj;
 };
+/**
+ * Reads a party name across CAMT.053 versions.
+ * Up to v07 the party sits directly under Dbtr/Cdtr; from v08 it is wrapped in a
+ * Party50Choice, putting the name at .Pty.Nm.
+ */
+const parsePartyName = (party) => party?.Pty?.Nm ?? party?.Nm;
 const parseTransactionDetail = (transactionDetail) => {
     const messageId = transactionDetail.Refs?.MsgId;
     const accountServicerReferenceId = transactionDetail.Refs?.AcctSvcrRef;
     const paymentInformationId = transactionDetail.Refs?.PmtInfId;
-    const remittanceInformation = transactionDetail.RmtInf?.Ustrd;
+    // Ustrd and AddtlInf are both maxOccurs="unbounded"; fold repeats into one string.
+    const remittanceInformation = parseAdditionalInformation(transactionDetail.RmtInf?.Ustrd);
+    const returnAdditionalInformation = parseAdditionalInformation(transactionDetail.RtrInf?.AddtlInf);
     const proprietaryPurpose = transactionDetail.Purp?.Prtry;
-    const returnReason = transactionDetail.RtrInf?.Rsn;
-    const returnAdditionalInformation = transactionDetail.RtrInf?.AddtlInf;
+    // Purpose2Choice is Cd | Prtry; the coded branch was previously discarded.
+    const purposeCode = transactionDetail.Purp?.Cd;
+    // ReturnReason5Choice is Cd | Prtry. Collapse to the value consumers want but
+    // remember the branch so exportTransactionDetails can write it back losslessly.
+    const rawReturnReason = transactionDetail.RtrInf?.Rsn;
+    const returnReason = rawReturnReason?.Cd ?? rawReturnReason?.Prtry;
+    const returnReasonSource = rawReturnReason?.Cd !== undefined
+        ? 'code'
+        : rawReturnReason?.Prtry !== undefined
+            ? 'proprietary'
+            : undefined;
     const endToEndId = transactionDetail.Refs?.EndToEndId;
     // Get Debtor information if 'Dbtr' is present
     let debtor;
@@ -3899,7 +3934,9 @@ const parseTransactionDetail = (transactionDetail) => {
     let debtorAccount;
     let debtorAgent;
     if (transactionDetail.RltdPties?.Dbtr) {
-        debtorName = transactionDetail.RltdPties.Dbtr.Nm;
+        // From CAMT.053.001.08 the party is wrapped in a Party50Choice (Pty | Agt);
+        // before that Nm sat directly on Dbtr. Support both layouts.
+        debtorName = parsePartyName(transactionDetail.RltdPties.Dbtr);
     }
     if (transactionDetail.RltdPties?.DbtrAcct) {
         debtorAccount = parseAccount(transactionDetail.RltdPties.DbtrAcct);
@@ -3920,7 +3957,7 @@ const parseTransactionDetail = (transactionDetail) => {
     let creditorAccount;
     let creditorAgent;
     if (transactionDetail.RltdPties?.Cdtr) {
-        creditorName = transactionDetail.RltdPties.Cdtr.Nm;
+        creditorName = parsePartyName(transactionDetail.RltdPties.Cdtr);
     }
     if (transactionDetail.RltdPties?.CdtrAcct) {
         creditorAccount = parseAccount(transactionDetail.RltdPties.CdtrAcct);
@@ -3942,7 +3979,9 @@ const parseTransactionDetail = (transactionDetail) => {
         paymentInformationId,
         remittanceInformation,
         proprietaryPurpose,
+        purposeCode,
         returnReason,
+        returnReasonSource,
         returnAdditionalInformation,
         debtor,
         creditor,
@@ -3963,7 +4002,14 @@ const exportTransactionDetails = (tx) => {
             Prtry: tx.proprietaryPurpose,
         },
         RtrInf: {
-            Rsn: tx.returnReason,
+            // Write the ReturnReason5Choice branch back. Prtry is the safe default for
+            // an unknown source: any Max35Text is valid there, whereas Cd is limited
+            // to the external return-reason code list.
+            Rsn: tx.returnReason
+                ? tx.returnReasonSource === 'code'
+                    ? { Cd: tx.returnReason }
+                    : { Prtry: tx.returnReason }
+                : undefined,
             AddtlInf: tx.returnAdditionalInformation,
         },
     };
