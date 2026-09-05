@@ -12,6 +12,10 @@
  *       BankToCustomerStatementV08 — the same export independently
  *       reproduces the 02 and 12 rows below
  *   12  pinned from schemas/camt/camt.053.001.12.xsd
+ *   13  pinned from the ISO 20022 eRepository (2026-09-04 export),
+ *       BankToCustomerStatementV13
+ *   14  pinned from the ISO 20022 eRepository (2026-09-04 export),
+ *       BankToCustomerStatementV14
  *
  * To add a version, inspect its XSD for the three switches below and add a
  * row. The matrix test picks it up automatically and validates the generated
@@ -37,6 +41,22 @@ export declare const VERSION_PROFILES: {
     };
     readonly '12': {
         /** Dbtr/Cdtr are Party50Choice; the party sits under Pty (Dbtr/Pty/Nm). */
+        readonly partyWrapper: true;
+        /** FinancialInstitutionIdentification23 spells it BICFI. */
+        readonly bicElement: "BICFI";
+        /** Sts is EntryStatus1Choice (Sts/Cd). */
+        readonly statusAsChoice: true;
+    };
+    readonly '13': {
+        /** Dbtr/Cdtr are Party50Choice (Pty | Agt). */
+        readonly partyWrapper: true;
+        /** FinancialInstitutionIdentification23 spells it BICFI. */
+        readonly bicElement: "BICFI";
+        /** Sts is EntryStatus1Choice (Sts/Cd). */
+        readonly statusAsChoice: true;
+    };
+    readonly '14': {
+        /** Dbtr/Cdtr are Party50Choice (Pty | Agt). */
         readonly partyWrapper: true;
         /** FinancialInstitutionIdentification23 spells it BICFI. */
         readonly bicElement: "BICFI";
