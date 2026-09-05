@@ -17,7 +17,10 @@
  *   14  pinned from the ISO 20022 eRepository (2026-09-04 export),
  *       BankToCustomerStatementV14
  *
- * To add a version, inspect its XSD for the three switches below and add a
+ * The TtlNetNtry switch flips at v04 (NumberAndSumOfTransactions2 -> 4),
+ * pinned from the same eRepository export.
+ *
+ * To add a version, inspect its XSD for the four switches below and add a
  * row. The matrix test picks it up automatically and validates the generated
  * document against schemas/camt/camt.053.001.<version>.xsd when that file is
  * present.
@@ -30,6 +33,8 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BIC";
         /** Sts is the EntryStatus2Code simple type. */
         readonly statusAsChoice: false;
+        /** TtlNtries carries TtlNetNtryAmt with a sibling CdtDbtInd (NumberAndSumOfTransactions2). */
+        readonly netEntriesAsComponent: false;
     };
     readonly '08': {
         /** Dbtr/Cdtr are Party40Choice (Pty | Agt) — the same shape v12's Party50Choice keeps. */
@@ -38,6 +43,8 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BICFI";
         /** Sts is EntryStatus1Choice (Sts/Cd). */
         readonly statusAsChoice: true;
+        /** TtlNtries carries TtlNetNtry/{Amt,CdtDbtInd} (NumberAndSumOfTransactions4, since v04). */
+        readonly netEntriesAsComponent: true;
     };
     readonly '12': {
         /** Dbtr/Cdtr are Party50Choice; the party sits under Pty (Dbtr/Pty/Nm). */
@@ -46,6 +53,8 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BICFI";
         /** Sts is EntryStatus1Choice (Sts/Cd). */
         readonly statusAsChoice: true;
+        /** TtlNtries carries TtlNetNtry/{Amt,CdtDbtInd} (NumberAndSumOfTransactions4, since v04). */
+        readonly netEntriesAsComponent: true;
     };
     readonly '13': {
         /** Dbtr/Cdtr are Party50Choice (Pty | Agt). */
@@ -54,6 +63,8 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BICFI";
         /** Sts is EntryStatus1Choice (Sts/Cd). */
         readonly statusAsChoice: true;
+        /** TtlNtries carries TtlNetNtry/{Amt,CdtDbtInd} (NumberAndSumOfTransactions4, since v04). */
+        readonly netEntriesAsComponent: true;
     };
     readonly '14': {
         /** Dbtr/Cdtr are Party50Choice (Pty | Agt). */
@@ -62,6 +73,8 @@ export declare const VERSION_PROFILES: {
         readonly bicElement: "BICFI";
         /** Sts is EntryStatus1Choice (Sts/Cd). */
         readonly statusAsChoice: true;
+        /** TtlNtries carries TtlNetNtry/{Amt,CdtDbtInd} (NumberAndSumOfTransactions4, since v04). */
+        readonly netEntriesAsComponent: true;
     };
 };
 export type Camt053Version = keyof typeof VERSION_PROFILES;
