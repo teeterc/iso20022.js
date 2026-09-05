@@ -1,4 +1,4 @@
-import { Currency } from 'dinero.js';
+import { Currency } from './currency';
 import { Alpha2Country } from './countries';
 /**
  * Represents a payment instruction with essential details.

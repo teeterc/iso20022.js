@@ -1,5 +1,10 @@
-import { Currency } from 'dinero.js';
 import { XMLBuilder } from 'fast-xml-parser';
+
+/**
+ * ISO 4217 currency code.
+ * This replaces the Currency type from dinero.js v1.
+ */
+type Currency = string;
 
 declare const Alpha2CountryCode: {
     readonly AF: "AF";

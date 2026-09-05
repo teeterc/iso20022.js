@@ -1,6 +1,6 @@
 'use strict';
 
-var Dinero = require('dinero.js');
+var dinero_js = require('dinero.js');
 
 var validator$2 = {};
 
@@ -2190,6 +2190,31 @@ function getCurrencyPrecision(currency) {
     }
 }
 
+function currencyObj(code) {
+    return { code, base: 10, exponent: getCurrencyPrecision(code) };
+}
+function createDinero(amount, currency) {
+    return dinero_js.dinero({ amount, currency: currencyObj(currency) });
+}
+function formatDinero(d) {
+    return dinero_js.toDecimal(d, ({ value, currency }) => {
+        const exponent = currency.exponent;
+        const parts = value.split('.');
+        const intPart = parts[0];
+        const decPart = (parts[1] || '').padEnd(exponent, '0');
+        return exponent > 0 ? `${intPart}.${decPart}` : intPart;
+    });
+}
+function formatAmount(amount, currency) {
+    return formatDinero(createDinero(amount, currency));
+}
+function sumAmounts(amounts, currency) {
+    const curr = currencyObj(currency);
+    const dineros = amounts.map(amount => dinero_js.dinero({ amount, currency: curr }));
+    const total = dineros.reduce((acc, next) => dinero_js.add(acc, next));
+    return formatDinero(total);
+}
+
 const parseAccount = (account) => {
     // Return just IBAN if it exists, else detailed local account details
     if (account.Id.IBAN) {
@@ -2283,24 +2308,14 @@ const exportAgent = (agent) => {
     }
     return obj;
 };
-// Parse raw currency data, turn into Dinero object and turn into minor units
+// Parse raw currency data and turn into minor units
 const parseAmountToMinorUnits = (rawAmount, currency = 'USD') => {
-    const currencyObject = Dinero({
-        currency: currency,
-        precision: getCurrencyPrecision(currency),
-    });
+    const precision = getCurrencyPrecision(currency);
     // Also make sure Javascript number parsing error do not happen.
-    return Math.floor(Number(rawAmount) * 10 ** currencyObject.getPrecision());
+    return Math.floor(Number(rawAmount) * 10 ** precision);
 };
 const exportAmountToString = (amount, currency = 'USD') => {
-    const currencyObject = Dinero({
-        amount,
-        currency: currency,
-        precision: getCurrencyPrecision(currency),
-    });
-    const precision = currencyObject.getPrecision();
-    const zeroes = '0'.repeat(precision);
-    return currencyObject.toFormat('0' + (zeroes.length > 0 ? '.' + zeroes : ''));
+    return formatAmount(amount, currency);
 };
 const parseDate = (dateElement) => {
     // Find the date element, which can be DtTm or Dt
@@ -2565,10 +2580,9 @@ class SWIFTCreditPaymentInitiation extends PaymentInitiation {
      */
     creditTransfer(paymentInstruction) {
         const paymentInstructionId = sanitize(paymentInstruction.id || v4(), 35);
-        const amount = Dinero({
-            amount: paymentInstruction.amount,
-            currency: paymentInstruction.currency,
-        }).toUnit();
+        const curr = currencyObj(paymentInstruction.currency);
+        const d = dinero_js.dinero({ amount: paymentInstruction.amount, currency: curr });
+        const amount = dinero_js.toDecimal(d);
         return {
             PmtId: {
                 InstrId: paymentInstructionId,
@@ -2763,10 +2777,7 @@ class SEPACreditPaymentInitiation extends PaymentInitiation {
      */
     sumPaymentInstructions(instructions) {
         this.validateAllInstructionsHaveSameCurrency();
-        const instructionDineros = instructions.map(instruction => Dinero({ amount: instruction.amount, currency: instruction.currency }));
-        return instructionDineros.reduce((acc, next) => {
-            return acc.add(next);
-        }, Dinero({ amount: 0, currency: instructions[0].currency })).toFormat('0.00');
+        return sumAmounts(instructions.map(i => i.amount), instructions[0].currency);
     }
     /**
      * Validates the payment initiation data according to SEPA requirements.
@@ -2796,7 +2807,6 @@ class SEPACreditPaymentInitiation extends PaymentInitiation {
     creditTransfer(instruction) {
         const paymentInstructionId = sanitize(instruction.id || v4(), 35);
         const endToEndId = sanitize(instruction.endToEndId || instruction.id || v4(), 35);
-        const dinero = Dinero({ amount: instruction.amount, currency: instruction.currency });
         return {
             PmtId: {
                 InstrId: paymentInstructionId,
@@ -2804,7 +2814,7 @@ class SEPACreditPaymentInitiation extends PaymentInitiation {
             },
             Amt: {
                 InstdAmt: {
-                    '#': dinero.toFormat('0.00'),
+                    '#': formatAmount(instruction.amount, instruction.currency),
                     '@Ccy': instruction.currency,
                 },
             },
@@ -2981,10 +2991,7 @@ class RTPCreditPaymentInitiation extends PaymentInitiation {
      * @throws {Error} If payment instructions have different currencies.
      */
     sumPaymentInstructions(instructions) {
-        const instructionDineros = instructions.map(instruction => Dinero({ amount: instruction.amount, currency: instruction.currency }));
-        return instructionDineros.reduce((acc, next) => {
-            return acc.add(next);
-        }, Dinero({ amount: 0, currency: instructions[0].currency })).toFormat('0.00');
+        return sumAmounts(instructions.map(i => i.amount), instructions[0].currency);
     }
     /**
      * Validates the payment initiation data according to SEPA requirements.
@@ -3006,7 +3013,6 @@ class RTPCreditPaymentInitiation extends PaymentInitiation {
     creditTransfer(instruction) {
         const paymentInstructionId = sanitize(instruction.id || v4(), 35);
         const endToEndId = sanitize(instruction.endToEndId || instruction.id || v4(), 35);
-        const dinero = Dinero({ amount: instruction.amount, currency: instruction.currency });
         return {
             PmtId: {
                 InstrId: paymentInstructionId,
@@ -3014,7 +3020,7 @@ class RTPCreditPaymentInitiation extends PaymentInitiation {
             },
             Amt: {
                 InstdAmt: {
-                    '#': dinero.toFormat('0.00'),
+                    '#': formatAmount(instruction.amount, instruction.currency),
                     '@Ccy': instruction.currency,
                 },
             },
@@ -3262,10 +3268,7 @@ class ACHCreditPaymentInitiation extends PaymentInitiation {
      * @throws {Error} If payment instructions have different currencies.
      */
     sumPaymentInstructions(instructions) {
-        const instructionDineros = instructions.map(instruction => Dinero({ amount: instruction.amount, currency: instruction.currency }));
-        return instructionDineros.reduce((acc, next) => {
-            return acc.add(next);
-        }, Dinero({ amount: 0, currency: instructions[0].currency })).toFormat('0.00');
+        return sumAmounts(instructions.map(i => i.amount), instructions[0].currency);
     }
     /**
      * Validates the payment initiation data according to ACH requirements.
@@ -3293,7 +3296,6 @@ class ACHCreditPaymentInitiation extends PaymentInitiation {
     creditTransfer(instruction) {
         const paymentInstructionId = sanitize(instruction.id || v4(), 35);
         const endToEndId = sanitize(instruction.endToEndId || instruction.id || v4(), 35);
-        const dinero = Dinero({ amount: instruction.amount, currency: instruction.currency });
         return {
             PmtId: {
                 InstrId: paymentInstructionId,
@@ -3301,7 +3303,7 @@ class ACHCreditPaymentInitiation extends PaymentInitiation {
             },
             Amt: {
                 InstdAmt: {
-                    '#': dinero.toFormat('0.00'),
+                    '#': formatAmount(instruction.amount, instruction.currency),
                     '@Ccy': instruction.currency,
                 },
             },
