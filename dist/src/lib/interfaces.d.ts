@@ -30,6 +30,18 @@ export interface GenericISO20022MessageFactory<T extends GenericISO20022Message>
 }
 export declare function registerISO20022Implementation(cl: GenericISO20022MessageFactory<GenericISO20022Message>): void;
 export declare function getISO20022Implementation(type: ISO20022MessageTypeName): GenericISO20022MessageFactory<GenericISO20022Message> | undefined;
+/**
+ * Leaf elements whose content is genuinely numeric or boolean by schema, and
+ * which the parsers consume as JS numbers / booleans. Only these are handed to
+ * fast-xml-parser's value parsing; every other leaf is kept as the raw string.
+ *
+ * - Amounts: `Amt` (`#text` beside a `Ccy` attribute), the bare-decimal
+ *   `TtlNetNtryAmt` / `Sum`, and the camt.006 `IntrBkSttlmAmt` / `InstdAmt` /
+ *   `AmtWthCcy` shapes.
+ * - Counters and sequence numbers: `NbOfNtries`, `ElctrncSeqNb`, `LglSeqNb`.
+ * - Indicators read with `=== true`: `RvslInd`.
+ */
+export declare const PARSED_VALUE_TAGS: ReadonlySet<string>;
 export declare class XML {
     /**
      * Creates and configures the XML Parser
